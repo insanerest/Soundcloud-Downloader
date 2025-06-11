@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SoundCloud Search</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f0f2f5;
+        padding: 2rem;
+      }
+
+      h1 {
+        color: #ff5500;
+      }
+
+      input[type="text"] {
+        width: 300px;
+        padding: 0.5rem;
+        font-size: 1rem;
+      }
+
+      button {
+        padding: 0.5rem 1rem;
+        font-size: 1rem;
+        background-color: #ff5500;
+        color: white;
+        border: none;
+        cursor: pointer;
+        margin-left: 0.5rem;
+      }
+
+      .results {
+        margin-top: 2rem;
+      }
+
+      .track {
+        display: flex;
+        align-items: flex-start;
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+        margin-bottom: 1rem;
+      }
+
+      .track img {
+        width: 100px;
+        height: 100px;
+        object-fit: cover;
+        border-radius: 8px;
+        margin-right: 1rem;
+      }
+
+      .track-details {
+        flex: 1;
+      }
+
+      .track-details h3 {
+        margin: 0;
+      }
+
+      .track-details p {
+        margin: 0.5rem 0;
+        color: #666;
+      }
+
+      audio {
+        width: 100%;
+        margin-top: 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🎵 SoundCloud Search</h1>
+    <input type="text" id="query" placeholder="Search for a track..." />
+    <button onclick="search()">Search</button>
+
+    <div id="results" class="results"></div>
+
+    <script>
+      async function search() {
+        const query = document.getElementById("query").value.trim();
+        const resultsDiv = document.getElementById("results");
+        resultsDiv.innerHTML = "🔄 Searching...";
+
+        if (!query) {
+          resultsDiv.innerHTML = "❌ Please enter a search term.";
+          return;
+        }
+
+        try {
+          const res = await fetch(`/api/search?q=${query}`);
+          const data = await res.json();
+          console.log(data);
+
+          if (data.length === 0 || !data.results) {
+            resultsDiv.innerHTML = "❌ No results found.";
+            return;
+          }
+
+          resultsDiv.innerHTML = "";
+
+          for (const track of data.results) {
+            const trackEl = document.createElement("div");
+            trackEl.className = "track";
+
+            const img = document.createElement("img");
+            img.src = track.img || "/blur.png";
+
+            const details = document.createElement("div");
+            details.className = "track-details";
+
+            const title = document.createElement("h3");
+            title.textContent = track.title;
+
+            const user = document.createElement("p");
+            user.textContent = `👤 ${track.username}`;
+
+            const visitLink = document.createElement("a");
+            visitLink.href = track.url;
+            visitLink.textContent = "🌐 Visit on Soundcloud";
+            visitLink.target = "_blank";
+
+            const downloadInfo = document.createElement("p");
+
+            const downloadLink = document.createElement("button");
+            downloadLink.textContent = "🌐 Download Or Stream";
+
+            downloadLink.onclick = async (e) => {
+              downloadLink.disabled = true
+              downloadInfo.textContent =
+                "Getting Track from SoundCloud. This may take a few minutes...";
+
+              try {
+                const res = await fetch("/api/download", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ url: track.url, name: track.title }),
+                });
+
+                if (!res.ok)
+                  throw new Error(`HTTP error! status: ${res.status}`);
+
+                const data = await res.json();
+                if (!data.success) {
+                  downloadInfo.textContent =
+                    "An error occurred. Please try again later";
+                  return;
+                }
+
+                // Now fetch the actual MP3 file as a blob to trigger programmatic download
+                /* const mp3Res = await fetch(`/${data.output}`);
+
+                if (!mp3Res.ok) throw new Error("Failed to fetch mp3 file");
+
+                const blob = await mp3Res.blob();
+                const blobUrl = URL.createObjectURL(blob);
+
+                const a = document.createElement("a");
+                a.href = blobUrl;
+                a.download = data.output;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+
+                URL.revokeObjectURL(blobUrl);
+
+                downloadInfo.textContent = "Download to device started.";*/
+                downloadInfo.innerHTML = `Click <a href="/${
+                  data.output
+                }">HERE</a> to download or <a href="/stream/${data.output
+                  .split("/")
+                  .pop()}">HERE</a> to stream`;
+              } catch (error) {
+                console.error("Download failed:", error);
+                downloadInfo.textContent =
+                  "An unexpected error occurred during download.";
+              }
+            };
+
+            details.appendChild(title);
+            details.appendChild(user);
+            details.appendChild(visitLink);
+            details.appendChild(document.createElement("br"));
+            details.appendChild(downloadLink);
+            details.append(downloadInfo);
+
+            trackEl.appendChild(img);
+            trackEl.appendChild(details);
+            resultsDiv.appendChild(trackEl);
+          }
+        } catch (err) {
+          console.error(err);
+          resultsDiv.innerHTML = "❌ Error while fetching results.";
+        }
+      }
+    </script>
+  </body>
+</html>
