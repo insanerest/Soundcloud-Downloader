@@ -3,7 +3,7 @@ const fs = require("fs");
 const { JSDOM } = require("jsdom");
 const app = express();
 const path = require("path");
-const PORT = 3009;
+const PORT = process.env.PORT || 3009;
 const cors = require("cors");
 const puppeteer = require("puppeteer");
 const htmlEntities = require("he");
@@ -264,7 +264,7 @@ app.post("/api/download", async (req, res) => {
     res.status(500).json({ success: false, error: "Failed to download." });
   }
 });
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT,() => {
   console.log(`✅ Server running on http://192.168.1.81:${PORT}`);
 });
 
