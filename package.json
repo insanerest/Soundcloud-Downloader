@@ -17,6 +17,7 @@
     "child_process": "^1.0.2",
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "ffmpeg-static": "^5.2.0",
     "fs": "^0.0.1-security",
     "he": "^1.2.0",
     "jsdom": "^26.1.0",
