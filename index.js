@@ -1,6 +1,7 @@
 const express = require("express");
 const app = express();
 const path = require("path");
+const fs = require("fs/promises");
 const PORT = process.env.PORT || 3009;
 const { spawn } = require("child_process");
 const clientId = "1JEFtFgP4Mocy0oEGJj2zZ0il9pEpBrM";
@@ -8,10 +9,30 @@ const clientId = "1JEFtFgP4Mocy0oEGJj2zZ0il9pEpBrM";
 const downloadNames = {};
 const ytDlpPath = path.join(__dirname, "bin", "yt-dlp");
 const ffmpegPath = require("ffmpeg-static");
-// Serve static files
-// Serve static files from "public"
+const downloadsPath = path.join(__dirname, "downloads");
+let lastCalledTimestamp = null;
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
+app.use("/api/download", async (req, res, next) => {
+  const now = Date.now();
+  if (!lastCalledTimestamp || now - lastCalledTimestamp > 24 * 60 * 60 * 1000) {
+    try {
+      await fs.access(downloadsPath);
+      await fs.rm(downloadsPath, { recursive: true, force: true });
+      console.log("Downloads folder deleted by middleware.");
+    } catch (err) {
+      if (err.code !== "ENOENT") {
+        console.error("Error checking or deleting folder:", err);
+        return res.status(500).send("Server error during cleanup.");
+      }
+    }
+
+    lastCalledTimestamp = now;
+  }
+
+  next();
+});
 
 async function getTracks(q) {
   const response = await fetch(
@@ -23,6 +44,16 @@ async function getTracks(q) {
 
 async function downloadTrack(trackUrl, realName) {
   return new Promise((resolve, reject) => {
+    if (
+      Object.values(downloadNames).some((savedName) => savedName === realName)
+    ) {
+      return resolve({
+        success: "true",
+        output: Object.keys(downloadNames).find(
+          (k) => downloadNames[k] === realName
+        ),
+      });
+    }
     const outputName = `track${Math.round(Math.random() * 100000)}`;
     downloadNames[outputName] = realName;
     const outputPath = path.resolve(__dirname, `downloads/${outputName}.mp3`);
@@ -56,7 +87,6 @@ async function downloadTrack(trackUrl, realName) {
     ytDlp.on("close", (code) => {
       if (code === 0) {
         console.log("✅ Download complete:", outputPath);
-        const relPath = outputPath.split("/").pop();
         resolve({
           success: true,
           output: outputPath.split("/").slice(-2).join("/"),
@@ -127,7 +157,6 @@ app.get("/api/search", async (req, res) => {
 
   try {
     const TrackResponse = await getTracks(query);
-    const elements = [];
     async function getInfo() {
       let names = [];
       let images = [];
