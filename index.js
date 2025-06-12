@@ -12,7 +12,7 @@ const clientId = "EI5cg08zX9Mu4tVS64VoTZfwV3z4x47y";
 
 const downloadNames = {};
 const ytDlpPath = path.join(__dirname, "bin", "yt-dlp");
-const ffmpegPath = path.join(__dirname, "bin", "ffmpeg");
+const ffmpegPath = require("ffmpeg-static");
 // Serve static files
 // Serve static files from "public"
 app.use(express.json());
@@ -31,8 +31,10 @@ async function downloadTrack(trackUrl, realName) {
     const outputName = `track${Math.round(Math.random() * 100000)}`;
     downloadNames[outputName] = realName;
     const outputPath = path.resolve(__dirname, `downloads/${outputName}.mp3`);
-
     const ytDlp = spawn(ytDlpPath, [
+      "--verbose",
+      "--ffmpeg-location",
+      ffmpegPath,
       "-x",
       "--audio-format",
       "mp3",
@@ -135,22 +137,27 @@ app.get("/api/search", async (req, res) => {
       let names = [];
       let images = [];
       let urls = [];
-      let titles = []
+      let titles = [];
       for (const track of TrackResponse.collection) {
         let isTrack = false;
         isTrack = !!track.artwork_url && track.kind === "track";
         if (isTrack) {
-          let username = track.user.username
+          let username = track.user.username;
           let picture = track.artwork_url;
           let url = track.permalink_url;
-          let title = track.title
-          names.push(username)
-          images.push(picture)
-          urls.push(url)
-          titles.push(title)
+          let title = track.title;
+          names.push(username);
+          images.push(picture);
+          urls.push(url);
+          titles.push(title);
         }
       }
-      return names.map((_, i) => ({ username: names[i], title: titles[i], url: urls[i], img: images[i] }));
+      return names.map((_, i) => ({
+        username: names[i],
+        title: titles[i],
+        url: urls[i],
+        img: images[i],
+      }));
     }
     const results = await getInfo();
     const response = {
@@ -189,7 +196,7 @@ app.post("/api/download", async (req, res) => {
   }
 });
 app.listen(PORT, () => {
-  console.log(`✅ Server running on http://192.168.1.81:${PORT}`);
+  console.log(`✅ Server running on http://localhost:${PORT}`);
 });
 
 // node download.js
