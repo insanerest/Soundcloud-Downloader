@@ -8,69 +8,28 @@ const cors = require("cors");
 const puppeteer = require("puppeteer");
 const htmlEntities = require("he");
 const { spawn } = require("child_process");
+const clientId = "EI5cg08zX9Mu4tVS64VoTZfwV3z4x47y";
 
-const downloadNames = {}
-const ytDlpPath = path.join(__dirname, "yt-dlp")
-
+const downloadNames = {};
+const ytDlpPath = path.join(__dirname, "bin", "yt-dlp");
+const ffmpegPath = path.join(__dirname, "bin", "ffmpeg");
 // Serve static files
 // Serve static files from "public"
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
-const downloadsDir = path.join(__dirname, "downloads");
 
 async function getTracks(q) {
-  let tracks = [];
-  const browser = await puppeteer.launch({
-    headless: true, // Headless mode is required in most Docker environments
-    defaultViewport: null,
-  });
-
-  const page = await browser.newPage();
-
-  const query = q; // Arabic text or any search term
-  const searchURL = `https://soundcloud.com/search?q=${query.replace(
-    / /g,
-    "%20"
-  )}`;
-
-  await page.goto(searchURL, {
-    waitUntil: "networkidle2", // Wait until all requests finish
-  });
-  const timesToScroll = 1;
-  const scrollDelay = 2000;
-  for (let i = 0; i < timesToScroll; i++) {
-    console.log(`Scrolling ${i + 1}/${timesToScroll}...`);
-
-    await page.evaluate(() => {
-      window.scrollTo(0, document.body.scrollHeight);
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, scrollDelay));
-  }
-
-  const htmlContent = await page.content();
-
-  await browser.close();
-  const dom = new JSDOM(htmlContent);
-  const document = dom.window.document;
-  const resultList = document.querySelectorAll(
-    ".search__listWrapper .searchList .lazyLoadingList__list li"
+  const response = await fetch(
+    `https://api-v2.soundcloud.com/search?q=${q}&client_id=${clientId}&limit=20`
   );
-  resultList.forEach((li) => {
-    const resultMain = li.querySelectorAll(
-      `.searchItem div[role="group"] .sound__body .sound__artwork .sound__coverArt`
-    );
-    resultMain.forEach((main) => {
-      tracks.push(main);
-    });
-  });
-  return tracks;
+  const parasedResponse = await response.json();
+  return await parasedResponse;
 }
 
 async function downloadTrack(trackUrl, realName) {
   return new Promise((resolve, reject) => {
     const outputName = `track${Math.round(Math.random() * 100000)}`;
-    downloadNames[outputName] = realName
+    downloadNames[outputName] = realName;
     const outputPath = path.resolve(__dirname, `downloads/${outputName}.mp3`);
 
     const ytDlp = spawn(ytDlpPath, [
@@ -136,7 +95,7 @@ app.get("/downloads/:file", (req, res) => {
 
   // Safe download logics
   console.log(downloadNames[requestedFile.split(".").shift()]);
-  const newName = downloadNames[requestedFile.split(".").shift()] + ".mp3"
+  const newName = downloadNames[requestedFile.split(".").shift()] + ".mp3";
   res.download(filePath, newName, (err) => {
     if (err && !res.headersSent) {
       console.error("Download error:", err.message);
@@ -160,7 +119,7 @@ app.get("/stream/:file", (req, res) => {
   if (!filePath.startsWith(downloadsRoot)) {
     return res.status(403).send("Access denied.");
   }
-  res.sendFile(path.join(__dirname,"downloads", requestedFile))
+  res.sendFile(path.join(__dirname, "downloads", requestedFile));
 });
 app.get("/api/search", async (req, res) => {
   console.time("Tracks");
@@ -170,65 +129,30 @@ app.get("/api/search", async (req, res) => {
   }
 
   try {
-    const matchingAnchors = await getTracks(query);
+    const TrackResponse = await getTracks(query);
     const elements = [];
     async function getInfo() {
       let names = [];
       let images = [];
       let urls = [];
-      for (const anchor of matchingAnchors) {
+      let titles = []
+      for (const track of TrackResponse.collection) {
         let isTrack = false;
-        isTrack = (anchor.href.match(/\//g) || []).length === 2;
+        isTrack = !!track.artwork_url && track.kind === "track";
         if (isTrack) {
-          elements.push(anchor.outerHTML);
-          const nameRes = await fetch(`https://soundcloud.com${anchor.href}`);
-          const nameHTML = await nameRes.text();
-          const nameDom = new JSDOM(nameHTML);
-          const document = nameDom.window.document;
-          const nameSelector = `noscript article header h1[itemprop="name"] a:not([itemprop="url"])`;
-          const imgSelector = `noscript article p img[itemprop="image"]`;
-
-          const namesTags = document.querySelectorAll(nameSelector);
-          namesTags.forEach((name) => {
-            let username = name.href.substring(1);
-            if (username) {
-              names.push(username);
-              isTrack = true;
-            }
-          });
-          const imgTags = document.querySelectorAll(imgSelector);
-          imgTags.forEach((img) => {
-            let picture = img.src;
-            images.push(picture);
-          });
-          urls.push(`https://soundcloud.com${anchor.href}`);
+          let username = track.user.username
+          let picture = track.artwork_url;
+          let url = track.permalink_url;
+          let title = track.title
+          names.push(username)
+          images.push(picture)
+          urls.push(url)
+          titles.push(title)
         }
       }
-      return { names: names, images: images, urls: urls };
+      return names.map((_, i) => ({ username: names[i], title: titles[i], url: urls[i], img: images[i] }));
     }
-    const info = await getInfo();
-
-    const results = elements
-      .map((el) => {
-        // Get the href from the <a> tag
-        const hrefMatch = el.match(/<a[^>]+href="([^"]+)"/);
-        // Get the aria-label from the <span> inside the <a>
-        const labelMatch = el.match(/aria-label="([^"]+)"/);
-
-        if (hrefMatch && labelMatch) {
-          const href = hrefMatch[1];
-          const title = htmlEntities.decode(labelMatch[1]); // optional
-          return { href, title };
-        }
-      })
-      .filter(Boolean);
-    for (const result of results) {
-      results[results.indexOf(result)].username =
-        info.names[results.indexOf(result)];
-      results[results.indexOf(result)].img =
-        info.images[results.indexOf(result)];
-      results[results.indexOf(result)].url = info.urls[results.indexOf(result)];
-    }
+    const results = await getInfo();
     const response = {
       length: results.length,
       results: results,
@@ -245,7 +169,7 @@ app.get("/api/search", async (req, res) => {
 
 app.post("/api/download", async (req, res) => {
   const { url, name } = req.body;
-  console.log(`Name: ${name}`)
+  console.log(`Name: ${name}`);
   if (!url) {
     return res.status(400).json({ error: "Missing URL parameter." });
   }
@@ -264,7 +188,7 @@ app.post("/api/download", async (req, res) => {
     res.status(500).json({ success: false, error: "Failed to download." });
   }
 });
-app.listen(PORT,() => {
+app.listen(PORT, () => {
   console.log(`✅ Server running on http://192.168.1.81:${PORT}`);
 });
 
