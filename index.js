@@ -1,14 +1,9 @@
 const express = require("express");
-const fs = require("fs");
-const { JSDOM } = require("jsdom");
 const app = express();
 const path = require("path");
 const PORT = process.env.PORT || 3009;
-const cors = require("cors");
-const puppeteer = require("puppeteer");
-const htmlEntities = require("he");
 const { spawn } = require("child_process");
-const clientId = "EI5cg08zX9Mu4tVS64VoTZfwV3z4x47y";
+const clientId = "1JEFtFgP4Mocy0oEGJj2zZ0il9pEpBrM";
 
 const downloadNames = {};
 const ytDlpPath = path.join(__dirname, "bin", "yt-dlp");
