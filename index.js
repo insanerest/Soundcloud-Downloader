@@ -49,11 +49,11 @@ async function downloadTrack(trackUrl, realName) {
       Object.values(downloadNames).some((savedName) => savedName === realName)
     ) {
       return resolve({
-        success: "true",
-        output: Object.keys(downloadNames).find(
+        success: true,
+        output: "downloads/" + Object.keys(downloadNames).find(
           (k) => downloadNames[k] === realName
-        ),
-      });
+        ) + ".mp3"
+      }); 
     }
     const outputName = `track${Math.round(Math.random() * 100000)}`;
     downloadNames[outputName] = realName;
@@ -88,6 +88,7 @@ async function downloadTrack(trackUrl, realName) {
     ytDlp.on("close", (code) => {
       if (code === 0) {
         console.log("✅ Download complete:", outputPath);
+        console.log(outputPath.split("/").slice(-2).join("/"));
         resolve({
           success: true,
           output: outputPath.split("/").slice(-2).join("/"),
