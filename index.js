@@ -6,7 +6,7 @@ const PORT = process.env.PORT || 3009;
 const { spawn } = require("child_process");
 const clientId = "1JEFtFgP4Mocy0oEGJj2zZ0il9pEpBrM";
 
-const downloadNames = {};
+let downloadNames = {};
 const ytDlpPath = path.join(__dirname, "bin", "yt-dlp");
 const ffmpegPath = require("ffmpeg-static");
 const downloadsPath = path.join(__dirname, "downloads");
@@ -20,6 +20,7 @@ app.use("/api/download", async (req, res, next) => {
     try {
       await fs.access(downloadsPath);
       await fs.rm(downloadsPath, { recursive: true, force: true });
+      downloadNames = {}
       console.log("Downloads folder deleted by middleware.");
     } catch (err) {
       if (err.code !== "ENOENT") {
