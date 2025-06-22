@@ -1,39 +1,17 @@
 const express = require("express");
 const app = express();
 const path = require("path");
-const fs = require("fs/promises");
+const manager = new (require("./manager"))("./tracks.json");
 const PORT = process.env.PORT || 3009;
 const { spawn } = require("child_process");
 const clientId = "1JEFtFgP4Mocy0oEGJj2zZ0il9pEpBrM";
 
-let downloadNames = {};
+let ongoingDownloads = new Map();
 const ytDlpPath = path.join(__dirname, "bin", "yt-dlp");
 const ffmpegPath = require("ffmpeg-static");
-const downloadsPath = path.join(__dirname, "downloads");
-let lastCalledTimestamp = null;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
-app.use("/api/download", async (req, res, next) => {
-  const now = Date.now();
-  if (!lastCalledTimestamp || now - lastCalledTimestamp > 24 * 60 * 60 * 1000) {
-    try {
-      await fs.access(downloadsPath);
-      await fs.rm(downloadsPath, { recursive: true, force: true });
-      downloadNames = {}
-      console.log("Downloads folder deleted by middleware.");
-    } catch (err) {
-      if (err.code !== "ENOENT") {
-        console.error("Error checking or deleting folder:", err);
-        return res.status(500).send("Server error during cleanup.");
-      }
-    }
-
-    lastCalledTimestamp = now;
-  }
-
-  next();
-});
 
 async function getTracks(q) {
   const response = await fetch(
@@ -44,19 +22,14 @@ async function getTracks(q) {
 }
 
 async function downloadTrack(trackUrl, realName) {
-  return new Promise((resolve, reject) => {
-    if (
-      Object.values(downloadNames).some((savedName) => savedName === realName)
-    ) {
+  return new Promise(async (resolve, reject) => {
+    if (await manager.hasValue(realName)) {
       return resolve({
         success: true,
-        output: "downloads/" + Object.keys(downloadNames).find(
-          (k) => downloadNames[k] === realName
-        ) + ".mp3"
-      }); 
+        output: "downloads/" + (await manager.getKeyOfValue(realName)) + ".mp3",
+      });
     }
     const outputName = `track${Math.round(Math.random() * 100000)}`;
-    downloadNames[outputName] = realName;
     const outputPath = path.resolve(__dirname, `downloads/${outputName}.mp3`);
     const ytDlp = spawn(ytDlpPath, [
       "--verbose",
@@ -89,6 +62,12 @@ async function downloadTrack(trackUrl, realName) {
       if (code === 0) {
         console.log("✅ Download complete:", outputPath);
         console.log(outputPath.split("/").slice(-2).join("/"));
+        console.log({
+          [outputName]: realName,
+        });
+        manager.writeJSON({
+          [outputName]: realName,
+        });
         resolve({
           success: true,
           output: outputPath.split("/").slice(-2).join("/"),
@@ -108,7 +87,7 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-app.get("/downloads/:file", (req, res) => {
+app.get("/downloads/:file", async (req, res) => {
   const requestedFile = req.params.file;
 
   if (!/^[\w\-.]+\.mp3$/.test(requestedFile)) {
@@ -122,9 +101,9 @@ app.get("/downloads/:file", (req, res) => {
     return res.status(403).send("Access denied.");
   }
 
-  // Safe download logics
-  console.log(downloadNames[requestedFile.split(".").shift()]);
-  const newName = downloadNames[requestedFile.split(".").shift()] + ".mp3";
+  const trackFile = await manager.getFile();
+  console.log(trackFile[requestedFile.split(".").shift()]);
+  const newName = trackFile[requestedFile.split(".").shift()] + ".mp3";
   res.download(filePath, newName, (err) => {
     if (err && !res.headersSent) {
       console.error("Download error:", err.message);
@@ -202,27 +181,50 @@ app.get("/api/search", async (req, res) => {
 
 app.post("/api/download", async (req, res) => {
   const { url, name } = req.body;
-  console.log(`Name: ${name}`);
   if (!url) {
     return res.status(400).json({ error: "Missing URL parameter." });
   }
+  if (ongoingDownloads.has(url)) {
+    try {
+      const result = await ongoingDownloads.get(url); // Wait for existing one
+      if (result.success) {
+        // Respond with download info (e.g., file path, name, size, etc.)
+        return res.json(result);
+      } else {
+        return res
+          .status(400)
+          .json({ success: false, error: "Download failed." });
+      }
+    } catch (err) {
+      console.error("Download error:", err);
+      return res
+        .status(500)
+        .json({ success: false, error: "Failed to download." });
+    }
+  }
 
   try {
-    const download = await downloadTrack(url, name);
+    const promise = downloadTrack(url, name);
+    ongoingDownloads.set(url, promise);
+    const download = await promise;
 
     if (download.success) {
       // Respond with download info (e.g., file path, name, size, etc.)
-      res.json(download);
+      return res.json(download);
     } else {
-      res.status(400).json({ success: false, error: "Download failed." });
+      return res
+        .status(400)
+        .json({ success: false, error: "Download failed." });
     }
   } catch (err) {
     console.error("Download error:", err);
-    res.status(500).json({ success: false, error: "Failed to download." });
+    return res
+      .status(500)
+      .json({ success: false, error: "Failed to download." });
   }
 });
 app.listen(PORT, () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
 });
 
-// node download.js
+// node index.js
