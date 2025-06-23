@@ -53,9 +53,9 @@ class JSONmanage {
     try {
       const content = await this.readFile(this.file, "utf-8");
       console.log(content)
-      return JSON.parse(content || {});
+      return JSON.parse(content || "{}");
     } catch (err) {
-      if (err.code === "ENOENT") return JSON.parse({});
+      if (err.code === "ENOENT") return JSON.parse("{}");
       throw err;
     }
   }
