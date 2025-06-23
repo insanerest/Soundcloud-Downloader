@@ -33,7 +33,7 @@ class JSONmanage {
 
   async hasValue(value) {
     try {
-      const parsedJSON = await this.getFile()
+      const parsedJSON = await this.getFile();
       return Object.values(parsedJSON).some((v) => v === value);
     } catch (err) {
       if (err.code !== "ENOENT") throw err;
@@ -42,7 +42,7 @@ class JSONmanage {
   }
   async getKeyOfValue(value) {
     try {
-      const parsedJSON = await this.getFile()
+      const parsedJSON = await this.getFile();
       return Object.keys(parsedJSON).find((k) => parsedJSON[k] === value);
     } catch (err) {
       if (err.code !== "ENOENT") throw err;
@@ -51,14 +51,12 @@ class JSONmanage {
 
   async getFile() {
     try {
-      const fileJson = await this.readFile(this.file, "utf-8");
-      if (!!fileJson) {
-        const parsedJSON = JSON.parse(fileJson);
-        return parsedJSON;
-      }
-      return {}
+      const content = await this.readFile(this.file, "utf-8");
+      console.log(content)
+      return JSON.parse(content || {});
     } catch (err) {
-      if (err.code !== "ENOENT") throw err;
+      if (err.code === "ENOENT") return JSON.parse({});
+      throw err;
     }
   }
 }
