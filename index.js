@@ -4,7 +4,7 @@ const path = require("path");
 const manager = new (require("./manager"))("./tracks.json");
 const PORT = process.env.PORT || 3009;
 const { spawn } = require("child_process");
-const clientId = "1JEFtFgP4Mocy0oEGJj2zZ0il9pEpBrM";
+const clientId = "FfGdwQbgPnr2SGjtap7Sdw3G06ctgQ46";
 
 let ongoingDownloads = new Map();
 const ytDlpPath = path.join(__dirname, "bin", "yt-dlp");
