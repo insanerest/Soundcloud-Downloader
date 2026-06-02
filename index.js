@@ -4,7 +4,7 @@ const path = require("path");
 const manager = new (require("./manager"))("./tracks.json");
 const PORT = process.env.PORT || 3009;
 const { spawn } = require("child_process");
-const clientId = "mWydTcSasUEc3PcF3aPqRJvzUhVzD5B5";
+const clientId = "tUy37JutyVy6r6JSMLnScSmBwA5DoTXE";
 
 let ongoingDownloads = new Map();
 const ytDlpPath = path.join(__dirname, "bin", "yt-dlp");
@@ -15,7 +15,7 @@ app.use(express.static(path.join(__dirname, "public")));
 
 async function getTracks(q) {
   const response = await fetch(
-    `https://api-v2.soundcloud.com/search?q=${q}&client_id=${clientId}&limit=20`
+    `https://api-v2.soundcloud.com/search?q=${q}&client_id=${clientId}&limit=20`,
   );
   const parasedResponse = await response.json();
   return await parasedResponse;

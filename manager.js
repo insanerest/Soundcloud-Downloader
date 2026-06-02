@@ -52,7 +52,7 @@ class JSONmanage {
   async getFile() {
     try {
       const content = await this.readFile(this.file, "utf-8");
-      console.log(content)
+      console.log(content);
       return JSON.parse(content || "{}");
     } catch (err) {
       if (err.code === "ENOENT") return JSON.parse("{}");
