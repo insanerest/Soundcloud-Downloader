@@ -22,7 +22,6 @@ class JSONmanage {
   }
 
   constructJSON(old, add) {
-    console.log(old);
     const newJSON = JSON.parse(old);
     const keys = Object.keys(add);
     keys.forEach((key) => {
@@ -52,7 +51,6 @@ class JSONmanage {
   async getFile() {
     try {
       const content = await this.readFile(this.file, "utf-8");
-      console.log(content);
       return JSON.parse(content || "{}");
     } catch (err) {
       if (err.code === "ENOENT") return JSON.parse("{}");

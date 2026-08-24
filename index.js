@@ -1,24 +1,30 @@
-const express = require("express");
-const app = express();
+const { App } = require("volten");
+const app = new App();
 const path = require("path");
 const manager = new (require("./manager"))("./tracks.json");
 const PORT = process.env.PORT || 3009;
 const { spawn } = require("child_process");
-const clientId = "tUy37JutyVy6r6JSMLnScSmBwA5DoTXE";
-
+const clientId =
+  process.env.SOUNDCLOUD_CLIENT_ID ??
+  (() => {
+    process.loadEnvFile();
+    return process.env.SOUNDCLOUD_CLIENT_ID;
+  })();
+if (!clientId) {
+  throw Error("Client ID was not provided in env");
+}
 let ongoingDownloads = new Map();
 const ytDlpPath = path.join(__dirname, "bin", "yt-dlp");
 const ffmpegPath = require("ffmpeg-static");
 
-app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
+app.static(path.join(__dirname, "public"));
 
 async function getTracks(q) {
   const response = await fetch(
     `https://api-v2.soundcloud.com/search?q=${q}&client_id=${clientId}&limit=20`,
   );
   const parasedResponse = await response.json();
-  return await parasedResponse;
+  return parasedResponse;
 }
 
 async function downloadTrack(trackUrl, realName) {
@@ -61,10 +67,6 @@ async function downloadTrack(trackUrl, realName) {
     ytDlp.on("close", (code) => {
       if (code === 0) {
         console.log("✅ Download complete:", outputPath);
-        console.log(outputPath.split("/").slice(-2).join("/"));
-        console.log({
-          [outputName]: realName,
-        });
         manager.writeJSON({
           [outputName]: realName,
         });
@@ -83,41 +85,40 @@ async function downloadTrack(trackUrl, realName) {
   });
 }
 
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+app.get("/", (ctx) => {
+  ctx.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-app.get("/downloads/:file", async (req, res) => {
-  const requestedFile = req.params.file;
+app.get("/downloads/:file", async (ctx) => {
+  const requestedFile = ctx.params.file;
 
   if (!/^[\w\-.]+\.mp3$/.test(requestedFile)) {
-    return res.status(400).send("Invalid file name.");
+    return ctx.status(400).send("Invalid file name.");
   }
 
   const filePath = path.resolve(__dirname, "downloads", requestedFile);
   const downloadsRoot = path.resolve(__dirname, "downloads");
 
   if (!filePath.startsWith(downloadsRoot)) {
-    return res.status(403).send("Access denied.");
+    return ctx.status(403).send("Access denied.");
   }
 
   const trackFile = await manager.getFile();
-  console.log(trackFile[requestedFile.split(".").shift()]);
   const newName = trackFile[requestedFile.split(".").shift()] + ".mp3";
-  res.download(filePath, newName, (err) => {
-    if (err && !res.headersSent) {
+  await ctx.download(filePath, newName, 200, (err) => {
+    if (err && !ctx.headersSent) {
       console.error("Download error:", err.message);
-      res.status(500).send("Download failed.");
+      ctx.status(500).send("Download failed.");
     }
   });
 });
 
-app.get("/stream/:file", (req, res) => {
-  const requestedFile = req.params.file;
+app.get("/stream/:file", (ctx) => {
+  const requestedFile = ctx.params.file;
 
   // 1. Validate filename
   if (!/^[\w\-.]+\.mp3$/.test(requestedFile)) {
-    return res.status(400).send("Invalid file name.");
+    return ctx.status(400).send("Invalid file name.");
   }
 
   const filePath = path.resolve(__dirname, "downloads", requestedFile);
@@ -125,15 +126,15 @@ app.get("/stream/:file", (req, res) => {
 
   // 2. Check for directory traversal
   if (!filePath.startsWith(downloadsRoot)) {
-    return res.status(403).send("Access denied.");
+    return ctx.status(403).send("Access denied.");
   }
-  res.sendFile(path.join(__dirname, "downloads", requestedFile));
+  ctx.sendFile(path.join(__dirname, "downloads", requestedFile));
 });
-app.get("/api/search", async (req, res) => {
+app.get("/api/search", async (ctx) => {
   console.time("Tracks");
-  const query = req.query.q;
+  const query = ctx.query.q;
   if (!query || typeof query !== "string" || query.length > 100) {
-    return res.status(400).json({ error: "Invalid query parameter." });
+    return ctx.status(400).json({ error: "Invalid query parameter." });
   }
 
   try {
@@ -170,34 +171,34 @@ app.get("/api/search", async (req, res) => {
       results: results,
     };
     console.timeEnd("Tracks");
-    res.json(response);
+    ctx.json(response);
   } catch (err) {
     console.log(err);
-    res.status(500).json({ error: "SoundCloud fetch failed." });
+    ctx.status(500).json({ error: "SoundCloud fetch failed." });
   }
 });
 
 // Proxy to resolve stream URLs
 
-app.post("/api/download", async (req, res) => {
-  const { url, name } = req.body;
+app.post("/api/download", async (ctx) => {
+  const { url, name } = await ctx.body();
   if (!url) {
-    return res.status(400).json({ error: "Missing URL parameter." });
+    return ctx.status(400).json({ error: "Missing URL parameter." });
   }
   if (ongoingDownloads.has(url)) {
     try {
       const result = await ongoingDownloads.get(url); // Wait for existing one
       if (result.success) {
         // Respond with download info (e.g., file path, name, size, etc.)
-        return res.json(result);
+        return ctx.json(result);
       } else {
-        return res
+        return ctx
           .status(400)
           .json({ success: false, error: "Download failed." });
       }
     } catch (err) {
       console.error("Download error:", err);
-      return res
+      return ctx
         .status(500)
         .json({ success: false, error: "Failed to download." });
     }
@@ -210,15 +211,15 @@ app.post("/api/download", async (req, res) => {
 
     if (download.success) {
       // Respond with download info (e.g., file path, name, size, etc.)
-      return res.json(download);
+      return ctx.json(download);
     } else {
-      return res
+      return ctx
         .status(400)
         .json({ success: false, error: "Download failed." });
     }
   } catch (err) {
     console.error("Download error:", err);
-    return res
+    return ctx
       .status(500)
       .json({ success: false, error: "Failed to download." });
   }
