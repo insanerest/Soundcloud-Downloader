@@ -7,7 +7,9 @@ const { spawn } = require("child_process");
 const clientId =
   process.env.SOUNDCLOUD_CLIENT_ID ??
   (() => {
-    process.loadEnvFile();
+    try {
+      process.loadEnvFile();
+    } catch {}
     return process.env.SOUNDCLOUD_CLIENT_ID;
   })();
 if (!clientId) {
