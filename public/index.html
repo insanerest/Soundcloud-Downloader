@@ -1,135 +1,250 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>SoundCloud Search</title>
-    <link rel="stylesheet" href="index.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SoundCloud Studio</title>
+    <link rel="stylesheet" href="index.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
-    <h1>SoundCloud Track Download</h1>
-    <input type="text" id="query" placeholder="Search for a track..." />
-    <button onclick="search()">Search</button>
+    <div class="app-wrapper">
+      <!-- Hero Section -->
+      <header class="hero">
+        <div class="logo-badge">🎵 SoundCloud Engine</div>
+        <h1>Discover & Download</h1>
+        <p>Search millions of tracks and remixes instantly.</p>
 
-    <div id="results" class="results"></div>
+        <div class="search-bar-container">
+          <input
+            type="text"
+            id="query"
+            placeholder="Search tracks or remixes..."
+            autocomplete="off"
+          />
+          <button onclick="search()">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <span>Search</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Results Grid Container -->
+      <main id="results" class="results-grid">
+        <div class="empty-state">
+          <div class="empty-icon">🎧</div>
+          <h3>Ready when you are</h3>
+          <p>Type something in the box above to start exploring tracks.</p>
+        </div>
+      </main>
+    </div>
+
+    <!-- Global Bottom Player -->
+    <div id="bottom-player" class="bottom-player">
+      <div class="player-info">
+        <img id="player-img" src="/blur.png" alt="Track Cover" />
+        <div class="player-text">
+          <h4 id="player-title">No Track Selected</h4>
+          <p id="player-artist">-</p>
+        </div>
+      </div>
+      <div class="player-controls">
+        <audio id="audio-player" controls controlsList="nodownload"></audio>
+      </div>
+      <button class="close-player" onclick="closePlayer()" title="Close Player">
+        ✕
+      </button>
+    </div>
 
     <script>
+      const inputEl = document.getElementById("query");
+      inputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const query = document.getElementById("query").value.trim();
+          if (query) search();
+        }
+      });
+
       async function search() {
         const query = document.getElementById("query").value.trim();
         const resultsDiv = document.getElementById("results");
-        resultsDiv.innerHTML = "🔄 Searching...";
 
         if (!query) {
-          resultsDiv.innerHTML = "❌ Please enter a search term.";
+          resultsDiv.innerHTML = `
+            <div class="empty-state error">
+              <div class="empty-icon">⚠️</div>
+              <h3>Input Required</h3>
+              <p>Please enter a track name or artist to search.</p>
+            </div>`;
           return;
         }
 
-        try {
-          const res = await fetch(`/api/search?q=${query}`);
-          const data = await res.json();
-          console.log(data);
+        resultsDiv.innerHTML = `
+          <div class="loader-container">
+            <div class="spinner"></div>
+            <p>Scanning SoundCloud soundwaves...</p>
+          </div>`;
 
-          if (data.length === 0 || !data.results) {
-            resultsDiv.innerHTML = "❌ No results found.";
+        try {
+          const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+          const data = await res.json();
+
+          if (!data.results || data.results.length === 0) {
+            resultsDiv.innerHTML = `
+              <div class="empty-state">
+                <div class="empty-icon">🔍</div>
+                <h3>No Tracks Found</h3>
+                <p>We couldn't find anything matching "${query}". Try another term.</p>
+              </div>`;
             return;
           }
 
           resultsDiv.innerHTML = "";
 
           for (const track of data.results) {
-            const trackEl = document.createElement("div");
-            trackEl.className = "track";
+            const card = document.createElement("div");
+            card.className = "track-card";
 
-            const img = document.createElement("img");
-            img.src = track.img || "/blur.png";
+            // Clean up strings to prevent breaking HTML attributes
+            const safeTitle = track.title.replace(/['"`]/g, "");
+            const safeArtist = track.username.replace(/['"`]/g, "");
+            const imgUrl = track.img || "/blur.png";
 
-            const details = document.createElement("div");
-            details.className = "track-details";
+            card.innerHTML = `
+              <div class="card-image-wrapper">
+                <img src="${imgUrl}" alt="${safeTitle}" loading="lazy" />
+                <a href="${track.url}" target="_blank" class="external-pill" title="View on SoundCloud">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                </a>
+              </div>
+              <div class="card-content">
+                <h3 title="${safeTitle}">${safeTitle}</h3>
+                <p class="artist-name">${safeArtist}</p>
+                
+                <div class="card-footer">
+                  <button class="action-btn" onclick="handleDownload(this, '${track.url}', '${safeTitle}', '${safeArtist}', '${imgUrl}')">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    <span>Get Track</span>
+                  </button>
+                </div>
+                <div class="status-box"></div>
+              </div>
+            `;
 
-            const title = document.createElement("h3");
-            title.textContent = track.title;
-
-            const user = document.createElement("p");
-            user.textContent = `👤 ${track.username}`;
-
-            const visitLink = document.createElement("a");
-            visitLink.href = track.url;
-            visitLink.textContent = "🌐 Visit on Soundcloud";
-            visitLink.target = "_blank";
-
-            const downloadInfo = document.createElement("p");
-
-            const downloadLink = document.createElement("button");
-            downloadLink.textContent = "🌐 Download Or Stream";
-
-            downloadLink.onclick = async (e) => {
-              downloadLink.disabled = true
-              downloadInfo.textContent =
-                "Getting Track from SoundCloud. This may take a few minutes...";
-
-              try {
-                const res = await fetch("/api/download", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({ url: track.url, name: track.title }),
-                });
-
-                if (!res.ok)
-                  throw new Error(`HTTP error! status: ${res.status}`);
-
-                const data = await res.json();
-                if (!data.success) {
-                  downloadInfo.textContent =
-                    "An error occurred. Please try again later";
-                  return;
-                }
-
-                // Now fetch the actual MP3 file as a blob to trigger programmatic download
-                /* const mp3Res = await fetch(`/${data.output}`);
-
-                if (!mp3Res.ok) throw new Error("Failed to fetch mp3 file");
-
-                const blob = await mp3Res.blob();
-                const blobUrl = URL.createObjectURL(blob);
-
-                const a = document.createElement("a");
-                a.href = blobUrl;
-                a.download = data.output;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-
-                URL.revokeObjectURL(blobUrl);
-
-                downloadInfo.textContent = "Download to device started.";*/
-                downloadInfo.innerHTML = `Click <a href="/${
-                  data.output
-                }">HERE</a> to download or <a href="/stream/${data.output
-                  .split("/")
-                  .pop()}">HERE</a> to stream`;
-              } catch (error) {
-                console.error("Download failed:", error);
-                downloadInfo.textContent =
-                  "An unexpected error occurred during download.";
-              }
-            };
-
-            details.appendChild(title);
-            details.appendChild(user);
-            details.appendChild(visitLink);
-            details.appendChild(document.createElement("br"));
-            details.appendChild(downloadLink);
-            details.append(downloadInfo);
-
-            trackEl.appendChild(img);
-            trackEl.appendChild(details);
-            resultsDiv.appendChild(trackEl);
+            resultsDiv.appendChild(card);
           }
         } catch (err) {
           console.error(err);
-          resultsDiv.innerHTML = "❌ Error while fetching results.";
+          resultsDiv.innerHTML = `
+            <div class="empty-state error">
+              <div class="empty-icon">❌</div>
+              <h3>Connection Error</h3>
+              <p>Failed to fetch results from the server. Please try again.</p>
+            </div>`;
         }
+      }
+
+      async function handleDownload(btn, url, title, artist, img) {
+        const cardContent = btn.closest(".card-content");
+        const statusBox = cardContent.querySelector(".status-box");
+
+        btn.disabled = true;
+        btn.innerHTML = `<div class="btn-spinner"></div> Processing...`;
+        statusBox.style.display = "block";
+        statusBox.innerHTML = "Fetching track layers... Please wait.";
+
+        try {
+          const res = await fetch("/api/download", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url, name: title }),
+          });
+
+          if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+
+          const data = await res.json();
+          if (!data.success) {
+            statusBox.innerHTML = "❌ Processing error. Try again.";
+            btn.disabled = false;
+            btn.innerHTML = `<span>Get Track</span>`;
+            return;
+          }
+
+          const fileName = data.output.split("/").pop();
+          const streamUrl = `/stream/${fileName}`;
+
+          // Clear box and construct functional buttons using DOM methods
+          statusBox.innerHTML = "";
+
+          const linksContainer = document.createElement("div");
+          linksContainer.className = "ready-links";
+
+          const dlLink = document.createElement("a");
+          dlLink.href = `/${data.output}`;
+          dlLink.download = true;
+          dlLink.className = "link-dl";
+          dlLink.textContent = "⬇ Download";
+
+          const streamBtn = document.createElement("button");
+          streamBtn.className = "link-stream";
+          streamBtn.textContent = "▶ Stream";
+          streamBtn.onclick = () => playStream(streamUrl, title, artist, img);
+
+          linksContainer.appendChild(dlLink);
+          linksContainer.appendChild(streamBtn);
+          statusBox.appendChild(linksContainer);
+
+          btn.innerHTML = `✓ Ready`;
+        } catch (error) {
+          console.error("Download failed:", error);
+          statusBox.innerHTML = "❌ Unexpected error occurred.";
+          btn.disabled = false;
+          btn.innerHTML = `<span>Get Track</span>`;
+        }
+      }
+
+      function playStream(audioUrl, title, artist, img) {
+        const player = document.getElementById("bottom-player");
+        const audioEl = document.getElementById("audio-player");
+
+        document.getElementById("player-img").src = img;
+        document.getElementById("player-title").textContent = title;
+        document.getElementById("player-artist").textContent = artist;
+
+        audioEl.src = audioUrl;
+        player.classList.add("show");
+
+        // Play the track
+        audioEl
+          .play()
+          .catch((e) => console.error("Playback prevented by browser:", e));
+      }
+
+      function closePlayer() {
+        const player = document.getElementById("bottom-player");
+        const audioEl = document.getElementById("audio-player");
+        player.classList.remove("show");
+        audioEl.pause();
+        audioEl.currentTime = 0;
       }
     </script>
   </body>
