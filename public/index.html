@@ -139,7 +139,7 @@
               <div class="card-content">
                 <h3 title="${safeTitle}">${safeTitle}</h3>
                 <p class="artist-name">${safeArtist}</p>
-                
+
                 <div class="card-footer">
                   <button class="action-btn" onclick="handleDownload(this, '${track.url}', '${safeTitle}', '${safeArtist}', '${imgUrl}')">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -200,7 +200,7 @@
 
           const dlLink = document.createElement("a");
           dlLink.href = `/${data.output}`;
-          dlLink.download = title;
+          dlLink.download = title + ".mp3";
           dlLink.className = "link-dl";
           dlLink.textContent = "⬇ Download";
 
