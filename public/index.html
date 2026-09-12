@@ -128,6 +128,8 @@
             const safeTitle = track.title.replace(/['"`]/g, "");
             const safeArtist = track.username.replace(/['"`]/g, "");
             const imgUrl = track.img || "/blur.png";
+            const streamUrl = `/api/download?url=${encodeURIComponent(track.url)}&name=${encodeURIComponent(safeTitle)}`;
+            const downloadUrl = `/api/download?url=${encodeURIComponent(track.url)}&name=${encodeURIComponent(safeTitle)}&download=1`;
 
             card.innerHTML = `
               <div class="card-image-wrapper">
@@ -140,13 +142,16 @@
                 <h3 title="${safeTitle}">${safeTitle}</h3>
                 <p class="artist-name">${safeArtist}</p>
 
-                <div class="card-footer">
-                  <button class="action-btn" onclick="handleDownload(this, '${track.url}', '${safeTitle}', '${safeArtist}', '${imgUrl}')">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    <span>Get Track</span>
+                <div class="card-footer" style="display: flex; gap: 8px;">
+                  <button class="action-btn" onclick="playStream('${streamUrl}', '${safeTitle}', '${safeArtist}', '${imgUrl}')">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                    <span>Stream</span>
                   </button>
+                  <a class="action-btn" style="text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px;" href="${downloadUrl}" download="${safeTitle}.mp3">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    <span>Download</span>
+                  </a>
                 </div>
-                <div class="status-box"></div>
               </div>
             `;
 
@@ -160,65 +165,6 @@
               <h3>Connection Error</h3>
               <p>Failed to fetch results from the server. Please try again.</p>
             </div>`;
-        }
-      }
-
-      async function handleDownload(btn, url, title, artist, img) {
-        const cardContent = btn.closest(".card-content");
-        const statusBox = cardContent.querySelector(".status-box");
-
-        btn.disabled = true;
-        btn.innerHTML = `<div class="btn-spinner"></div> Processing...`;
-        statusBox.style.display = "block";
-        statusBox.innerHTML = "Fetching track layers... Please wait.";
-
-        try {
-          const res = await fetch("/api/download", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url, name: title }),
-          });
-
-          if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-
-          const data = await res.json();
-          if (!data.success) {
-            statusBox.innerHTML = "❌ Processing error. Try again.";
-            btn.disabled = false;
-            btn.innerHTML = `<span>Get Track</span>`;
-            return;
-          }
-
-          const fileName = data.output.split("/").pop();
-          const streamUrl = `/stream/${fileName}`;
-
-          // Clear box and construct functional buttons using DOM methods
-          statusBox.innerHTML = "";
-
-          const linksContainer = document.createElement("div");
-          linksContainer.className = "ready-links";
-
-          const dlLink = document.createElement("a");
-          dlLink.href = `/${data.output}`;
-          dlLink.download = title + ".mp3";
-          dlLink.className = "link-dl";
-          dlLink.textContent = "⬇ Download";
-
-          const streamBtn = document.createElement("button");
-          streamBtn.className = "link-stream";
-          streamBtn.textContent = "▶ Stream";
-          streamBtn.onclick = () => playStream(streamUrl, title, artist, img);
-
-          linksContainer.appendChild(dlLink);
-          linksContainer.appendChild(streamBtn);
-          statusBox.appendChild(linksContainer);
-
-          btn.innerHTML = `✓ Ready`;
-        } catch (error) {
-          console.error("Download failed:", error);
-          statusBox.innerHTML = "❌ Unexpected error occurred.";
-          btn.disabled = false;
-          btn.innerHTML = `<span>Get Track</span>`;
         }
       }
 
