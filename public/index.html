@@ -11,6 +11,7 @@
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
+    <script src="/hls.min.js"></script>
   </head>
   <body>
     <div class="app-wrapper">
@@ -124,11 +125,10 @@
             const card = document.createElement("div");
             card.className = "track-card";
 
-            // Clean up strings to prevent breaking HTML attributes
-            const safeTitle = track.title.replace(/['"`]/g, "");
-            const safeArtist = track.username.replace(/['"`]/g, "");
+            // Clean up strings for HTML display
+            const safeTitle = (track.title || "Untitled").replace(/['"`]/g, "");
+            const safeArtist = (track.username || "Unknown").replace(/['"`]/g, "");
             const imgUrl = track.img || "/blur.png";
-            const streamUrl = `/api/download?url=${encodeURIComponent(track.url)}&name=${encodeURIComponent(safeTitle)}`;
             const downloadUrl = `/api/download?url=${encodeURIComponent(track.url)}&name=${encodeURIComponent(safeTitle)}&download=1`;
 
             card.innerHTML = `
@@ -143,7 +143,7 @@
                 <p class="artist-name">${safeArtist}</p>
 
                 <div class="card-footer" style="display: flex; gap: 8px;">
-                  <button class="action-btn" onclick="playStream('${streamUrl}', '${safeTitle}', '${safeArtist}', '${imgUrl}')">
+                  <button class="action-btn" onclick="playStream('${encodeURIComponent(track.url)}', '${encodeURIComponent(safeTitle)}', '${encodeURIComponent(safeArtist)}', '${encodeURIComponent(imgUrl)}')">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                     <span>Stream</span>
                   </button>
@@ -168,29 +168,96 @@
         }
       }
 
-      function playStream(audioUrl, title, artist, img) {
+      let currentHls = null;
+
+      async function playStream(encUrl, encTitle, encArtist, encImg) {
+        const trackUrl = decodeURIComponent(encUrl);
+        const title = decodeURIComponent(encTitle);
+        const artist = decodeURIComponent(encArtist);
+        const img = decodeURIComponent(encImg);
+
         const player = document.getElementById("bottom-player");
         const audioEl = document.getElementById("audio-player");
 
         document.getElementById("player-img").src = img;
         document.getElementById("player-title").textContent = title;
         document.getElementById("player-artist").textContent = artist;
-
-        audioEl.src = audioUrl;
         player.classList.add("show");
 
-        // Play the track
-        audioEl
-          .play()
-          .catch((e) => console.error("Playback prevented by browser:", e));
+        // Destroy any active HLS stream instance before switching
+        if (currentHls) {
+          currentHls.destroy();
+          currentHls = null;
+        }
+        audioEl.pause();
+        audioEl.removeAttribute("src");
+        audioEl.load();
+
+        try {
+          const res = await fetch(
+            `/api/stream-info?url=${encodeURIComponent(trackUrl)}&name=${encodeURIComponent(title)}`,
+          );
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+
+          const streamUrl = data.streamUrl;
+          const isHls = data.type === "hls";
+
+          if (isHls && !audioEl.canPlayType("application/vnd.apple.mpegurl")) {
+            // Use HLS.js for browsers without native HLS (Chrome, Edge, Firefox)
+            if (typeof Hls !== "undefined" && Hls.isSupported()) {
+              const hls = new Hls({
+                enableWorker: true,
+                lowLatencyMode: true,
+                backBufferLength: 60,
+              });
+              currentHls = hls;
+              hls.loadSource(streamUrl);
+              hls.attachMedia(audioEl);
+              hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                audioEl
+                  .play()
+                  .catch((e) => console.error("Playback prevented:", e));
+              });
+              hls.on(Hls.Events.ERROR, (event, errData) => {
+                if (errData.fatal) {
+                  console.warn(
+                    "HLS fatal error, falling back to server stream proxy:",
+                    errData,
+                  );
+                  hls.destroy();
+                  currentHls = null;
+                  audioEl.src = `/api/download?url=${encodeURIComponent(trackUrl)}&name=${encodeURIComponent(title)}`;
+                  audioEl
+                    .play()
+                    .catch((e) => console.error("Fallback play error:", e));
+                }
+              });
+              return;
+            }
+          }
+
+          // Native playback (Safari HLS, progressive MP3, or local cached MP3)
+          audioEl.src = streamUrl;
+          audioEl.play().catch((e) => console.error("Playback prevented:", e));
+        } catch (err) {
+          console.warn("Stream info failed, falling back to server proxy:", err);
+          audioEl.src = `/api/download?url=${encodeURIComponent(trackUrl)}&name=${encodeURIComponent(title)}`;
+          audioEl.play().catch((e) => console.error("Fallback play error:", e));
+        }
       }
 
       function closePlayer() {
         const player = document.getElementById("bottom-player");
         const audioEl = document.getElementById("audio-player");
         player.classList.remove("show");
+        if (currentHls) {
+          currentHls.destroy();
+          currentHls = null;
+        }
         audioEl.pause();
-        audioEl.currentTime = 0;
+        audioEl.removeAttribute("src");
+        audioEl.load();
       }
     </script>
   </body>

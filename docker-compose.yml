@@ -1,0 +1,19 @@
+services:
+  soundcloud-downloader:
+    build: .
+    image: soundcloud-downloader:latest
+    ports:
+      - "3009:3009"
+    environment:
+      - SOUNDCLOUD_CLIENT_ID=${SOUNDCLOUD_CLIENT_ID}
+      - PORT=3009
+      # Both paths live inside the single mounted data volume
+      - DOWNLOADS_DIR=/app/data/downloads
+      - TRACKS_FILE=/app/data/tracks.json
+    volumes:
+      # Single directory volume — Docker volumes must be directories, never files
+      - data:/app/data
+    restart: unless-stopped
+
+volumes:
+  data:

@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+
+services:
+  - type: web
+    name: soundcloud-downloader
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter           # upgrade to standard/pro for more CPU (ffmpeg is heavy)
+    region: oregon
+    healthCheckPath: /
+
+    disk:
+      name: soundcloud-data
+      mountPath: /data
+      sizeGB: 10            # increase if you cache many tracks
+
+    envVars:
+      - key: PORT
+        value: "3009"
+      - key: NODE_ENV
+        value: production
+      # Persist downloads and track-name cache on the mounted disk
+      - key: DOWNLOADS_DIR
+        value: /data/downloads
+      - key: TRACKS_FILE
+        value: /data/tracks.json
+      # Set your SoundCloud client ID in the Render dashboard (or uncomment below)
+      - key: SOUNDCLOUD_CLIENT_ID
+        sync: false         # marks it as a secret to be set manually in the dashboard

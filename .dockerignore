@@ -1,0 +1,8 @@
+node_modules/
+downloads/
+tracks.json
+.DS_Store
+.env
+*.log
+# The Linux standalone binary is arch-specific — use the Python zipapp instead
+bin/yt-dlp_linux
