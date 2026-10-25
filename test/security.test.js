@@ -1,10 +1,20 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { validateTrackUrl, validateStreamUrl, setBoundedCache } = require("../security");
+const {
+  validateTrackUrl,
+  validateStreamUrl,
+  setBoundedCache,
+} = require("../security.js");
 
 test("accepts HTTPS SoundCloud track URLs", () => {
-  assert.equal(validateTrackUrl("https://soundcloud.com/artist/track"), "https://soundcloud.com/artist/track");
-  assert.equal(validateTrackUrl("https://m.soundcloud.com/artist/track"), "https://m.soundcloud.com/artist/track");
+  assert.equal(
+    validateTrackUrl("https://soundcloud.com/artist/track"),
+    "https://soundcloud.com/artist/track",
+  );
+  assert.equal(
+    validateTrackUrl("https://m.soundcloud.com/artist/track"),
+    "https://m.soundcloud.com/artist/track",
+  );
 });
 
 test("rejects non-SoundCloud, non-HTTPS and credentialed track URLs", () => {
@@ -15,14 +25,20 @@ test("rejects non-SoundCloud, non-HTTPS and credentialed track URLs", () => {
     "https://user:pass@soundcloud.com/track",
     "not a URL",
     "x".repeat(2049),
-  ]) assert.throws(() => validateTrackUrl(value));
+  ])
+    assert.throws(() => validateTrackUrl(value));
 });
 
 test("accepts trusted SoundCloud CDN stream URLs only", () => {
-  assert.equal(validateStreamUrl("https://cf-media.sndcdn.com/stream"), "https://cf-media.sndcdn.com/stream");
+  assert.equal(
+    validateStreamUrl("https://cf-media.sndcdn.com/stream"),
+    "https://cf-media.sndcdn.com/stream",
+  );
   assert.throws(() => validateStreamUrl("http://sndcdn.com/stream"));
   assert.throws(() => validateStreamUrl("https://127.0.0.1/private"));
-  assert.throws(() => validateStreamUrl("https://sndcdn.com.evil.example/stream"));
+  assert.throws(() =>
+    validateStreamUrl("https://sndcdn.com.evil.example/stream"),
+  );
 });
 
 test("bounded cache evicts oldest entries", () => {

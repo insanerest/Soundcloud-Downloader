@@ -20,8 +20,7 @@ function validateTrackUrl(value) {
   }
   const host = parsed.hostname.toLowerCase();
   const isSoundCloudHost =
-    host === "soundcloud.com" ||
-    host.endsWith(".soundcloud.com");
+    host === "soundcloud.com" || host.endsWith(".soundcloud.com");
   if (
     parsed.protocol !== "https:" ||
     !isSoundCloudHost ||

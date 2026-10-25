@@ -7,7 +7,8 @@ const ffmpegPath = process.env.FFMPEG_BIN || require("ffmpeg-static");
 
 // --- Configuration ---
 const PORT = process.env.PORT || 3009;
-const ytDlpPath = process.env.YT_DLP_PATH || path.join(__dirname, "bin", "yt-dlp");
+const ytDlpPath =
+  process.env.YT_DLP_PATH || path.join(__dirname, "bin", "yt-dlp");
 
 // Ensure Environment / Client ID
 let clientId = process.env.SOUNDCLOUD_CLIENT_ID;
@@ -34,7 +35,11 @@ const PROCESS_TIMEOUT_MS = 60_000;
 const RATE_WINDOW_MS = 60_000;
 const rateBuckets = new Map();
 
-const { setBoundedCache, validateTrackUrl, validateStreamUrl } = require("./security");
+const {
+  setBoundedCache,
+  validateTrackUrl,
+  validateStreamUrl,
+} = require("./security.js");
 
 async function fetchTimed(url, options = {}) {
   const response = await fetch(url, {
@@ -46,10 +51,12 @@ async function fetchTimed(url, options = {}) {
     const finalUrl = new URL(response.url);
     if (
       finalUrl.protocol !== "https:" ||
-      !(finalUrl.hostname === "soundcloud.com" ||
+      !(
+        finalUrl.hostname === "soundcloud.com" ||
         finalUrl.hostname.endsWith(".soundcloud.com") ||
         finalUrl.hostname === "sndcdn.com" ||
-        finalUrl.hostname.endsWith(".sndcdn.com"))
+        finalUrl.hostname.endsWith(".sndcdn.com")
+      )
     ) {
       await response.body?.cancel();
       throw new Error("Unexpected redirect host.");
@@ -83,12 +90,11 @@ function allowRequest(ctx, limit) {
 async function resolveStreamUrlWithYtDlp(trackUrl) {
   const safeTrackUrl = validateTrackUrl(trackUrl);
   return new Promise((resolve, reject) => {
-    const yt = spawn(ytDlpPath, [
-      "-g",
-      "-f",
-      "ba[ext=mp3][protocol=https]/ba[ext=mp3]/ba",
-      safeTrackUrl,
-    ], { stdio: ["ignore", "pipe", "pipe"] });
+    const yt = spawn(
+      ytDlpPath,
+      ["-g", "-f", "ba[ext=mp3][protocol=https]/ba[ext=mp3]/ba", safeTrackUrl],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
     let out = "",
       err = "";
 
@@ -106,9 +112,13 @@ async function resolveStreamUrlWithYtDlp(trackUrl) {
       clearTimeout(timeout);
       const url = out.trim();
       if (code === 0 && url) {
-        try { resolve(validateStreamUrl(url)); } catch (error) { reject(error); }
-      }
-      else reject(new Error(`yt-dlp exited with code ${code}: ${err.trim()}`));
+        try {
+          resolve(validateStreamUrl(url));
+        } catch (error) {
+          reject(error);
+        }
+      } else
+        reject(new Error(`yt-dlp exited with code ${code}: ${err.trim()}`));
     });
     yt.on("error", (e) =>
       reject(new Error(`yt-dlp spawn error: ${e.message}`)),
@@ -177,7 +187,9 @@ async function resolveTrackStream(trackUrl) {
                 /\.m3u8/i.test(sData.url);
               const streamUrl = validateStreamUrl(sData.url);
               const mimeType = candidate.format?.mime_type || "";
-              const isMp3 = /audio\\/(mpeg|mp3)/i.test(mimeType) || /mp3/i.test(candidate.preset || "");
+              const isMp3 =
+                /audio\\/(mpeg | mp3) / i.test(mimeType) ||
+                /mp3/i.test(candidate.preset || "");
               const result = {
                 streamUrl,
                 isMp3,
@@ -243,7 +255,11 @@ app.get("/api/search", async (ctx) => {
     for (const t of collection) {
       if (t.kind === "track" && (t.artwork_url || t.user?.avatar_url)) {
         if (t.permalink_url && t.media) {
-          try { validateTrackUrl(t.permalink_url); } catch { continue; }
+          try {
+            validateTrackUrl(t.permalink_url);
+          } catch {
+            continue;
+          }
           setBoundedCache(trackMetaCache, t.permalink_url, {
             media: t.media,
             track_authorization: t.track_authorization,
@@ -310,16 +326,20 @@ async function handleDownloadStream(ctx) {
   try {
     trackUrl = validateTrackUrl(url);
   } catch {
-    return ctx.status(400).json({ error: "Only valid HTTPS SoundCloud track URLs are accepted." });
+    return ctx
+      .status(400)
+      .json({ error: "Only valid HTTPS SoundCloud track URLs are accepted." });
   }
 
-  const safeName = String(name || "track")
-    .replace(/[\\/\\?%*:|"<>]/g, "_")
-    .replace(/[\x00-\x1f\x7f]/g, "_")
-    .replace(/\s+/g, " ")
-    .slice(0, 160) || "track";
+  const safeName =
+    String(name || "track")
+      .replace(/[\\/\\?%*:|"<>]/g, "_")
+      .replace(/[\x00-\x1f\x7f]/g, "_")
+      .replace(/\s+/g, " ")
+      .slice(0, 160) || "track";
   const fileName = `${safeName}.mp3`;
-  const isAttachment = ctx.query.download === "1" || ctx.query.download === "true";
+  const isAttachment =
+    ctx.query.download === "1" || ctx.query.download === "true";
   const contentDisposition = `${isAttachment ? "attachment" : "inline"}; filename="track.mp3"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 
   let streamInfo;
@@ -340,7 +360,9 @@ async function handleDownloadStream(ctx) {
   const res = ctx.res;
   const shouldTranscode = streamInfo.isHls || !streamInfo.isMp3;
   if (res?.socket) {
-    try { res.socket.setNoDelay(true); } catch {}
+    try {
+      res.socket.setNoDelay(true);
+    } catch {}
   }
   res.setHeader("Content-Type", "audio/mpeg");
   res.setHeader("Content-Disposition", contentDisposition);
@@ -349,9 +371,16 @@ async function handleDownloadStream(ctx) {
 
   if (!shouldTranscode) {
     const upstream = https.get(resolvedUrl, (upstreamRes) => {
-      const contentType = String(upstreamRes.headers["content-type"] || "").toLowerCase();
-      if (upstreamRes.statusCode < 200 || upstreamRes.statusCode >= 300 ||
-          (contentType && !contentType.includes("audio/mpeg") && !contentType.includes("audio/mp3"))) {
+      const contentType = String(
+        upstreamRes.headers["content-type"] || "",
+      ).toLowerCase();
+      if (
+        upstreamRes.statusCode < 200 ||
+        upstreamRes.statusCode >= 300 ||
+        (contentType &&
+          !contentType.includes("audio/mpeg") &&
+          !contentType.includes("audio/mp3"))
+      ) {
         upstreamRes.destroy();
         if (!res.headersSent) res.statusCode = 502;
         if (!res.writableEnded) res.end();
@@ -367,7 +396,9 @@ async function handleDownloadStream(ctx) {
         if (!res.writableEnded) res.destroy(error);
       });
     });
-    upstream.setTimeout(REQUEST_TIMEOUT_MS, () => upstream.destroy(new Error("Upstream stream timed out.")));
+    upstream.setTimeout(REQUEST_TIMEOUT_MS, () =>
+      upstream.destroy(new Error("Upstream stream timed out.")),
+    );
     upstream.on("error", (error) => {
       console.error("Upstream request error:", error.message);
       if (!res.headersSent && !res.writableEnded) {
@@ -382,13 +413,28 @@ async function handleDownloadStream(ctx) {
   }
 
   res.writeHead(200);
-  const ffmpeg = spawn(ffmpegPath, [
-    "-nostdin", "-hide_banner", "-loglevel", "error",
-    "-rw_timeout", String(REQUEST_TIMEOUT_MS * 1000),
-    "-i", resolvedUrl,
-    "-vn", "-c:a", "libmp3lame", "-b:a", "128k",
-    "-f", "mp3", "pipe:1",
-  ], { stdio: ["ignore", "pipe", "pipe"] });
+  const ffmpeg = spawn(
+    ffmpegPath,
+    [
+      "-nostdin",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-rw_timeout",
+      String(REQUEST_TIMEOUT_MS * 1000),
+      "-i",
+      resolvedUrl,
+      "-vn",
+      "-c:a",
+      "libmp3lame",
+      "-b:a",
+      "128k",
+      "-f",
+      "mp3",
+      "pipe:1",
+    ],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
 
   let finished = false;
   const killFfmpeg = () => {
@@ -411,7 +457,8 @@ async function handleDownloadStream(ctx) {
   ffmpeg.on("close", (code) => {
     clearTimeout(timeout);
     finished = true;
-    if (code !== 0 && !res.writableEnded) res.destroy(new Error("Audio transcoding failed."));
+    if (code !== 0 && !res.writableEnded)
+      res.destroy(new Error("Audio transcoding failed."));
     else if (!res.writableEnded) res.end();
   });
   res.on("close", () => {
