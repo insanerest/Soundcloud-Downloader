@@ -314,8 +314,9 @@ async function handleDownloadStream(ctx) {
   }
 
   const safeName = String(name || "track")
-    .replace(/[\\/\\?%*:|"< >\\x00-\\x1f\\x7f]/g, "_")
-    .replace(/\\s+/g, " ")
+    .replace(/[\\/\\?%*:|"<>]/g, "_")
+    .replace(/[\x00-\x1f\x7f]/g, "_")
+    .replace(/\s+/g, " ")
     .slice(0, 160) || "track";
   const fileName = `${safeName}.mp3`;
   const isAttachment = ctx.query.download === "1" || ctx.query.download === "true";
