@@ -108,14 +108,17 @@
         try {
           const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
           const data = await res.json();
+          if (!res.ok) throw new Error("Search request failed.");
 
           if (!data.results || data.results.length === 0) {
             resultsDiv.innerHTML = `
               <div class="empty-state">
                 <div class="empty-icon">🔍</div>
                 <h3>No Tracks Found</h3>
-    <p class="no-results-query"></p>
+                <p class="no-results-query"></p>
               </div>`;
+            resultsDiv.querySelector(".no-results-query").textContent =
+              "We couldn't find anything matching \"" + query + "\". Try another term.";
             return;
           }
 
