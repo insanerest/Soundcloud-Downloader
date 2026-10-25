@@ -104,7 +104,9 @@ async function fetchTimed(url, options = {}) {
     if (
       finalUrl.protocol !== "https:" ||
       !(finalUrl.hostname === "soundcloud.com" ||
-        finalUrl.hostname.endsWith(".soundcloud.com"))
+        finalUrl.hostname.endsWith(".soundcloud.com") ||
+        finalUrl.hostname === "sndcdn.com" ||
+        finalUrl.hostname.endsWith(".sndcdn.com"))
     ) {
       await response.body?.cancel();
       throw new Error("Unexpected redirect host.");
