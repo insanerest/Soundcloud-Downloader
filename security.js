@@ -1,3 +1,5 @@
+const MAX_CACHE_ENTRIES = 500;
+
 function setBoundedCache(cache, key, value) {
   if (cache.has(key)) cache.delete(key);
   cache.set(key, value);
