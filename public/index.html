@@ -108,53 +108,116 @@
         try {
           const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
           const data = await res.json();
+          if (!res.ok) throw new Error("Search request failed.");
 
           if (!data.results || data.results.length === 0) {
             resultsDiv.innerHTML = `
               <div class="empty-state">
                 <div class="empty-icon">🔍</div>
                 <h3>No Tracks Found</h3>
-                <p>We couldn't find anything matching "${query}". Try another term.</p>
+                <p class="no-results-query"></p>
               </div>`;
+            resultsDiv.querySelector(".no-results-query").textContent =
+              "We couldn't find anything matching \"" +
+              query +
+              '". Try another term.';
             return;
           }
 
           resultsDiv.innerHTML = "";
 
           for (const track of data.results) {
+            let trackUrl;
+            try {
+              trackUrl = new URL(track.url);
+              if (
+                trackUrl.protocol !== "https:" ||
+                !(
+                  trackUrl.hostname === "soundcloud.com" ||
+                  trackUrl.hostname.endsWith(".soundcloud.com")
+                ) ||
+                trackUrl.username ||
+                trackUrl.password
+              )
+                continue;
+            } catch {
+              continue;
+            }
+            const title = String(track.title || "Untitled");
+            const artist = String(track.username || "Unknown");
+            let imageUrl = "/blur.png";
+            try {
+              const candidateImage = new URL(
+                track.img || "/blur.png",
+                window.location.origin,
+              );
+              if (
+                candidateImage.protocol === "https:" ||
+                candidateImage.origin === window.location.origin
+              )
+                imageUrl = candidateImage.href;
+            } catch {}
             const card = document.createElement("div");
             card.className = "track-card";
-
-            // Clean up strings for HTML display
-            const safeTitle = (track.title || "Untitled").replace(/['"`]/g, "");
-            const safeArtist = (track.username || "Unknown").replace(/['"`]/g, "");
-            const imgUrl = track.img || "/blur.png";
-            const downloadUrl = `/api/download?url=${encodeURIComponent(track.url)}&name=${encodeURIComponent(safeTitle)}&download=1`;
-
-            card.innerHTML = `
-              <div class="card-image-wrapper">
-                <img src="${imgUrl}" alt="${safeTitle}" loading="lazy" />
-                <a href="${track.url}" target="_blank" class="external-pill" title="View on SoundCloud">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                </a>
-              </div>
-              <div class="card-content">
-                <h3 title="${safeTitle}">${safeTitle}</h3>
-                <p class="artist-name">${safeArtist}</p>
-
-                <div class="card-footer" style="display: flex; gap: 8px;">
-                  <button class="action-btn" onclick="playStream('${encodeURIComponent(track.url)}', '${encodeURIComponent(safeTitle)}', '${encodeURIComponent(safeArtist)}', '${encodeURIComponent(imgUrl)}')">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                    <span>Stream</span>
-                  </button>
-                  <a class="action-btn" style="text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px;" href="${downloadUrl}" download="${safeTitle}.mp3">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    <span>Download</span>
-                  </a>
-                </div>
-              </div>
-            `;
-
+            const imageWrapper = document.createElement("div");
+            imageWrapper.className = "card-image-wrapper";
+            const image = document.createElement("img");
+            image.src = imageUrl;
+            image.alt = title;
+            image.loading = "lazy";
+            imageWrapper.appendChild(image);
+            const externalLink = document.createElement("a");
+            externalLink.href = trackUrl.href;
+            externalLink.target = "_blank";
+            externalLink.rel = "noopener noreferrer";
+            externalLink.className = "external-pill";
+            externalLink.title = "View on SoundCloud";
+            externalLink.setAttribute("aria-label", "View on SoundCloud");
+            externalLink.innerHTML =
+              '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>';
+            imageWrapper.appendChild(externalLink);
+            card.appendChild(imageWrapper);
+            const content = document.createElement("div");
+            content.className = "card-content";
+            const heading = document.createElement("h3");
+            heading.textContent = title;
+            heading.title = title;
+            const artistText = document.createElement("p");
+            artistText.className = "artist-name";
+            artistText.textContent = artist;
+            content.append(heading, artistText);
+            const footer = document.createElement("div");
+            footer.className = "card-footer";
+            footer.style.display = "flex";
+            footer.style.gap = "8px";
+            const streamButton = document.createElement("button");
+            streamButton.type = "button";
+            streamButton.className = "action-btn";
+            streamButton.innerHTML =
+              '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Stream</span>';
+            streamButton.addEventListener("click", () =>
+              playStream(trackUrl.href, title, artist, imageUrl),
+            );
+            const downloadLink = document.createElement("a");
+            downloadLink.className = "action-btn";
+            downloadLink.style.textDecoration = "none";
+            downloadLink.style.display = "inline-flex";
+            downloadLink.style.alignItems = "center";
+            downloadLink.style.justifyContent = "center";
+            downloadLink.style.gap = "6px";
+            downloadLink.href =
+              "/api/download?url=" +
+              encodeURIComponent(trackUrl.href) +
+              "&name=" +
+              encodeURIComponent(title) +
+              "&download=1";
+            downloadLink.download =
+              title.replace(/[\/\\?%*:|"< >\x00-\x1f\x7f]/g, "_") + ".mp3";
+            downloadLink.innerHTML =
+              '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg><span>Download</span>';
+            footer.append(streamButton, downloadLink);
+            content.appendChild(footer);
+            card.appendChild(content);
             resultsDiv.appendChild(card);
           }
         } catch (err) {
@@ -170,12 +233,7 @@
 
       let currentHls = null;
 
-      async function playStream(encUrl, encTitle, encArtist, encImg) {
-        const trackUrl = decodeURIComponent(encUrl);
-        const title = decodeURIComponent(encTitle);
-        const artist = decodeURIComponent(encArtist);
-        const img = decodeURIComponent(encImg);
-
+      async function playStream(trackUrl, title, artist, img) {
         const player = document.getElementById("bottom-player");
         const audioEl = document.getElementById("audio-player");
 
@@ -202,6 +260,18 @@
 
           const streamUrl = data.streamUrl;
           const isHls = data.type === "hls";
+          const resolvedUrl = new URL(streamUrl);
+          if (
+            resolvedUrl.protocol !== "https:" ||
+            !(
+              resolvedUrl.hostname === "soundcloud.com" ||
+              resolvedUrl.hostname.endsWith(".soundcloud.com") ||
+              resolvedUrl.hostname === "sndcdn.com" ||
+              resolvedUrl.hostname.endsWith(".sndcdn.com")
+            )
+          ) {
+            throw new Error("Rejected unexpected stream host.");
+          }
 
           if (isHls && !audioEl.canPlayType("application/vnd.apple.mpegurl")) {
             // Use HLS.js for browsers without native HLS (Chrome, Edge, Firefox)
@@ -241,7 +311,10 @@
           audioEl.src = streamUrl;
           audioEl.play().catch((e) => console.error("Playback prevented:", e));
         } catch (err) {
-          console.warn("Stream info failed, falling back to server proxy:", err);
+          console.warn(
+            "Stream info failed, falling back to server proxy:",
+            err,
+          );
           audioEl.src = `/api/download?url=${encodeURIComponent(trackUrl)}&name=${encodeURIComponent(title)}`;
           audioEl.play().catch((e) => console.error("Fallback play error:", e));
         }

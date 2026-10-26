@@ -7,7 +7,8 @@ const ffmpegPath = process.env.FFMPEG_BIN || require("ffmpeg-static");
 
 // --- Configuration ---
 const PORT = process.env.PORT || 3009;
-const ytDlpPath = process.env.YT_DLP_PATH || path.join(__dirname, "bin", "yt-dlp");
+const ytDlpPath =
+  process.env.YT_DLP_PATH || path.join(__dirname, "bin", "yt-dlp");
 
 // Ensure Environment / Client ID
 let clientId = process.env.SOUNDCLOUD_CLIENT_ID;
@@ -28,25 +29,96 @@ app.static(path.join(__dirname, "public"));
 const streamUrlCache = new Map(); // trackUrl -> { streamUrl, isHls, type, title, artist, expiresAt }
 const trackMetaCache = new Map(); // permalink_url -> { media, track_authorization, title, username, duration }
 
+const MAX_CACHE_ENTRIES = 500;
+const REQUEST_TIMEOUT_MS = 15_000;
+const PROCESS_TIMEOUT_MS = 60_000;
+const RATE_WINDOW_MS = 60_000;
+const rateBuckets = new Map();
+
+const {
+  setBoundedCache,
+  validateTrackUrl,
+  validateStreamUrl,
+} = require("./security.js");
+
+async function fetchTimed(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  // Redirects from an allowed SoundCloud API endpoint must not be trusted blindly.
+  if (response.url) {
+    const finalUrl = new URL(response.url);
+    if (
+      finalUrl.protocol !== "https:" ||
+      !(
+        finalUrl.hostname === "soundcloud.com" ||
+        finalUrl.hostname.endsWith(".soundcloud.com") ||
+        finalUrl.hostname === "sndcdn.com" ||
+        finalUrl.hostname.endsWith(".sndcdn.com")
+      )
+    ) {
+      await response.body?.cancel();
+      throw new Error("Unexpected redirect host.");
+    }
+  }
+  return response;
+}
+
+function allowRequest(ctx, limit) {
+  const ip = ctx.req?.socket?.remoteAddress || "unknown";
+  const now = Date.now();
+  let bucket = rateBuckets.get(ip);
+  if (!bucket || now - bucket.startedAt >= RATE_WINDOW_MS) {
+    bucket = { startedAt: now, count: 0 };
+    rateBuckets.set(ip, bucket);
+  }
+  bucket.count += 1;
+  if (rateBuckets.size > 2000) {
+    for (const [key, entry] of rateBuckets) {
+      if (now - entry.startedAt >= RATE_WINDOW_MS) rateBuckets.delete(key);
+    }
+  }
+  if (bucket.count > limit) {
+    ctx.status(429).json({ error: "Too many requests. Please retry shortly." });
+    return false;
+  }
+  return true;
+}
+
 // --- Helper: Resolve Stream URL via yt-dlp (Fallback) ---
 async function resolveStreamUrlWithYtDlp(trackUrl) {
+  const safeTrackUrl = validateTrackUrl(trackUrl);
   return new Promise((resolve, reject) => {
-    const yt = spawn(ytDlpPath, [
-      "-g",
-      "-f",
-      "ba[ext=mp3][protocol=https]/ba[ext=mp3]/ba",
-      trackUrl,
-    ]);
+    const yt = spawn(
+      ytDlpPath,
+      ["-g", "-f", "ba[ext=mp3][protocol=https]/ba[ext=mp3]/ba", safeTrackUrl],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
     let out = "",
       err = "";
 
-    yt.stdout.on("data", (d) => (out += d.toString()));
+    const timeout = setTimeout(() => {
+      yt.kill("SIGKILL");
+      reject(new Error("yt-dlp timed out."));
+    }, PROCESS_TIMEOUT_MS);
+    yt.stdout.on("data", (d) => {
+      out += d.toString();
+      if (out.length > 16_384) yt.kill("SIGKILL");
+    });
     yt.stderr.on("data", (d) => (err += d.toString()));
 
     yt.on("close", (code) => {
+      clearTimeout(timeout);
       const url = out.trim();
-      if (code === 0 && url) resolve(url);
-      else reject(new Error(`yt-dlp exited with code ${code}: ${err.trim()}`));
+      if (code === 0 && url) {
+        try {
+          resolve(validateStreamUrl(url));
+        } catch (error) {
+          reject(error);
+        }
+      } else
+        reject(new Error(`yt-dlp exited with code ${code}: ${err.trim()}`));
     });
     yt.on("error", (e) =>
       reject(new Error(`yt-dlp spawn error: ${e.message}`)),
@@ -56,6 +128,7 @@ async function resolveStreamUrlWithYtDlp(trackUrl) {
 
 // --- Helper: Fast Track & Stream URL Resolution ---
 async function resolveTrackStream(trackUrl) {
+  trackUrl = validateTrackUrl(trackUrl);
   // Check memory cache first (15-min TTL)
   const cached = streamUrlCache.get(trackUrl);
   if (cached && cached.expiresAt > Date.now()) {
@@ -67,7 +140,7 @@ async function resolveTrackStream(trackUrl) {
     let trackMeta = trackMetaCache.get(trackUrl);
     if (!trackMeta || !trackMeta.media) {
       const resolveApiUrl = `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(trackUrl)}&client_id=${clientId}`;
-      const resolveRes = await fetch(resolveApiUrl);
+      const resolveRes = await fetchTimed(resolveApiUrl);
       if (resolveRes.ok) {
         const d = await resolveRes.json();
         if (d && d.media && Array.isArray(d.media.transcodings)) {
@@ -78,7 +151,7 @@ async function resolveTrackStream(trackUrl) {
             username: d.user?.username || "",
             duration: d.duration,
           };
-          trackMetaCache.set(trackUrl, trackMeta);
+          setBoundedCache(trackMetaCache, trackUrl, trackMeta);
         }
       }
     }
@@ -105,22 +178,28 @@ async function resolveTrackStream(trackUrl) {
             ? `&track_authorization=${trackMeta.track_authorization}`
             : "";
           const streamReqUrl = `${candidate.url}?client_id=${clientId}${authParam}`;
-          const sRes = await fetch(streamReqUrl);
+          const sRes = await fetchTimed(streamReqUrl);
           if (sRes.ok) {
             const sData = await sRes.json();
             if (sData.url) {
               const isHls =
                 candidate.format?.protocol === "hls" ||
                 /\.m3u8/i.test(sData.url);
+              const streamUrl = validateStreamUrl(sData.url);
+              const mimeType = candidate.format?.mime_type || "";
+              const isMp3 =
+                /audio\\/(mpeg | mp3) / i.test(mimeType) ||
+                /mp3/i.test(candidate.preset || "");
               const result = {
-                streamUrl: sData.url,
+                streamUrl,
+                isMp3,
                 isHls,
                 type: isHls ? "hls" : "progressive",
                 title: trackMeta.title,
                 artist: trackMeta.username,
                 expiresAt: Date.now() + 15 * 60 * 1000,
               };
-              streamUrlCache.set(trackUrl, result);
+              setBoundedCache(streamUrlCache, trackUrl, result);
               return result;
             }
           }
@@ -136,7 +215,8 @@ async function resolveTrackStream(trackUrl) {
     const ytUrl = await resolveStreamUrlWithYtDlp(trackUrl);
     const isHls = /\.m3u8/i.test(ytUrl);
     const result = {
-      streamUrl: ytUrl,
+      streamUrl: validateStreamUrl(ytUrl),
+      isMp3: false,
       isHls,
       type: isHls ? "hls" : "progressive",
       expiresAt: Date.now() + 15 * 60 * 1000,
@@ -156,16 +236,17 @@ app.get("/", (ctx) => {
 
 // Search SoundCloud
 app.get("/api/search", async (ctx) => {
-  console.time("Search Time");
+  if (!allowRequest(ctx, 60)) return;
   const query = ctx.query.q;
   if (!query || typeof query !== "string" || query.length > 100) {
     return ctx.status(400).json({ error: "Invalid query parameter." });
   }
 
   try {
-    const res = await fetch(
+    const res = await fetchTimed(
       `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&client_id=${clientId}&limit=20`,
     );
+    if (!res.ok) throw new Error(`SoundCloud search returned ${res.status}`);
     const data = await res.json();
     const collection = Array.isArray(data.collection) ? data.collection : [];
 
@@ -174,7 +255,12 @@ app.get("/api/search", async (ctx) => {
     for (const t of collection) {
       if (t.kind === "track" && (t.artwork_url || t.user?.avatar_url)) {
         if (t.permalink_url && t.media) {
-          trackMetaCache.set(t.permalink_url, {
+          try {
+            validateTrackUrl(t.permalink_url);
+          } catch {
+            continue;
+          }
+          setBoundedCache(trackMetaCache, t.permalink_url, {
             media: t.media,
             track_authorization: t.track_authorization,
             title: t.title,
@@ -191,7 +277,6 @@ app.get("/api/search", async (ctx) => {
       }
     }
 
-    console.timeEnd("Search Time");
     ctx.json({ length: results.length, results });
   } catch (err) {
     console.error("Search error:", err);
@@ -201,14 +286,16 @@ app.get("/api/search", async (ctx) => {
 
 // Endpoint for instant client-side streaming info (Zero disk usage)
 app.get("/api/stream-info", async (ctx) => {
+  if (!allowRequest(ctx, 30)) return;
   const url = ctx.query.url;
   if (!url) return ctx.status(400).json({ error: "Missing URL parameter." });
 
   try {
-    const info = await resolveTrackStream(url);
+    const info = await resolveTrackStream(validateTrackUrl(url));
     return ctx.json({
       type: info.type,
       isHls: info.isHls,
+      isMp3: info.isMp3,
       streamUrl: info.streamUrl,
       title: info.title,
       artist: info.artist,
@@ -221,6 +308,7 @@ app.get("/api/stream-info", async (ctx) => {
 
 // Main Stream/Download Handler (100% Diskless Pass-Through Streaming)
 async function handleDownloadStream(ctx) {
+  if (!allowRequest(ctx, 30)) return;
   let url = ctx.query.url;
   let name = ctx.query.name;
 
@@ -234,109 +322,152 @@ async function handleDownloadStream(ctx) {
 
   if (!url) return ctx.status(400).json({ error: "Missing URL parameter." });
 
-  const safeName = (name || "track").replace(/[/\\?%*:|"<>]/g, "_");
+  let trackUrl;
+  try {
+    trackUrl = validateTrackUrl(url);
+  } catch {
+    return ctx
+      .status(400)
+      .json({ error: "Only valid HTTPS SoundCloud track URLs are accepted." });
+  }
+
+  const safeName =
+    String(name || "track")
+      .replace(/[\\/\\?%*:|"<>]/g, "_")
+      .replace(/[\x00-\x1f\x7f]/g, "_")
+      .replace(/\s+/g, " ")
+      .slice(0, 160) || "track";
   const fileName = `${safeName}.mp3`;
   const isAttachment =
     ctx.query.download === "1" || ctx.query.download === "true";
-  const contentDisposition = `${isAttachment ? "attachment" : "inline"}; filename="${encodeURIComponent(fileName)}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+  const contentDisposition = `${isAttachment ? "attachment" : "inline"}; filename="track.mp3"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 
-  // Resolve direct stream URL fast
   let streamInfo;
   try {
-    streamInfo = await resolveTrackStream(url);
+    streamInfo = await resolveTrackStream(trackUrl);
   } catch (err) {
     console.error("Track resolution error:", err.message);
-    return ctx.status(500).json({ error: "Failed to resolve track URL." });
+    return ctx.status(502).json({ error: "Failed to resolve track URL." });
   }
 
-  const resolvedUrl = streamInfo.streamUrl;
-  const isHLS = streamInfo.isHls;
+  let resolvedUrl;
+  try {
+    resolvedUrl = validateStreamUrl(streamInfo.streamUrl);
+  } catch {
+    return ctx.status(502).json({ error: "Resolved stream URL was rejected." });
+  }
 
   const res = ctx.res;
-  const req = ctx.req;
-
-  // Immediate TCP delivery (disable Nagle algorithm)
-  if (res && res.socket) {
+  const shouldTranscode = streamInfo.isHls || !streamInfo.isMp3;
+  if (res?.socket) {
     try {
       res.socket.setNoDelay(true);
     } catch {}
   }
-
   res.setHeader("Content-Type", "audio/mpeg");
   res.setHeader("Content-Disposition", contentDisposition);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Cache-Control", "no-store");
 
-  if (!isHLS) {
-    // Direct HTTP MP3: stream directly to client
-    console.log("📡 Streaming direct HTTP MP3 (diskless pass-through)");
-    const httpReq = https.get(resolvedUrl, (httpRes) => {
-      if (httpRes.headers["content-length"]) {
-        res.setHeader("Content-Length", httpRes.headers["content-length"]);
+  if (!shouldTranscode) {
+    const upstream = https.get(resolvedUrl, (upstreamRes) => {
+      const contentType = String(
+        upstreamRes.headers["content-type"] || "",
+      ).toLowerCase();
+      if (
+        upstreamRes.statusCode < 200 ||
+        upstreamRes.statusCode >= 300 ||
+        (contentType &&
+          !contentType.includes("audio/mpeg") &&
+          !contentType.includes("audio/mp3"))
+      ) {
+        upstreamRes.destroy();
+        if (!res.headersSent) res.statusCode = 502;
+        if (!res.writableEnded) res.end();
+        return;
+      }
+      if (upstreamRes.headers["content-length"]) {
+        res.setHeader("Content-Length", upstreamRes.headers["content-length"]);
       }
       res.writeHead(200);
-
-      httpRes.pipe(res);
-      httpRes.on("error", (e) => {
-        console.error("HTTP stream error:", e.message);
-        if (res && !res.writableEnded) res.end();
+      upstreamRes.pipe(res);
+      upstreamRes.on("error", (error) => {
+        console.error("Upstream audio error:", error.message);
+        if (!res.writableEnded) res.destroy(error);
       });
     });
-
-    httpReq.on("error", (e) => {
-      console.error("HTTP request error:", e.message);
-      if (res && !res.writableEnded) res.end();
+    upstream.setTimeout(REQUEST_TIMEOUT_MS, () =>
+      upstream.destroy(new Error("Upstream stream timed out.")),
+    );
+    upstream.on("error", (error) => {
+      console.error("Upstream request error:", error.message);
+      if (!res.headersSent && !res.writableEnded) {
+        res.statusCode = 502;
+        res.end();
+      } else if (!res.writableEnded) res.destroy(error);
     });
-    req.on("close", () => httpReq.destroy());
-  } else {
-    // HLS via ffmpeg: transcode on the fly directly to response (0 disk usage)
-    console.log("📡 Streaming HLS via ffmpeg (diskless pass-through)");
-    res.setHeader("Transfer-Encoding", "chunked");
-    res.writeHead(200);
+    res.on("close", () => {
+      if (!res.writableEnded) upstream.destroy();
+    });
+    return;
+  }
 
-    const ffmpeg = spawn(ffmpegPath, [
-      "-probesize",
-      "32768",
-      "-analyzeduration",
-      "0",
-      "-fflags",
-      "+nobuffer+fastseek+discardcorrupt",
-      "-flags",
-      "low_delay",
+  res.writeHead(200);
+  const ffmpeg = spawn(
+    ffmpegPath,
+    [
+      "-nostdin",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-rw_timeout",
+      String(REQUEST_TIMEOUT_MS * 1000),
       "-i",
       resolvedUrl,
+      "-vn",
       "-c:a",
       "libmp3lame",
       "-b:a",
       "128k",
-      "-flush_packets",
-      "1",
       "-f",
       "mp3",
       "pipe:1",
-    ]);
+    ],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
 
-    ffmpeg.stdout.pipe(res);
-
-    ffmpeg.stderr.on("data", (d) => {
-      const msg = d.toString().trim();
-      if (msg && msg.includes("Error")) console.error("ffmpeg:", msg);
-    });
-
-    ffmpeg.on("close", () => {
-      if (res && !res.writableEnded) res.end();
-    });
-
-    ffmpeg.on("error", (e) => {
-      console.error("ffmpeg spawn error:", e.message);
-      if (res && !res.writableEnded) res.end();
-    });
-
-    req.on("close", () => {
-      try {
-        if (res) ffmpeg.stdout.unpipe(res);
-      } catch {}
-      if (!ffmpeg.killed && ffmpeg.exitCode === null) ffmpeg.kill();
-    });
-  }
+  let finished = false;
+  const killFfmpeg = () => {
+    if (!ffmpeg.killed && ffmpeg.exitCode === null) ffmpeg.kill("SIGKILL");
+  };
+  const timeout = setTimeout(() => {
+    console.error("ffmpeg process timed out.");
+    killFfmpeg();
+  }, PROCESS_TIMEOUT_MS);
+  ffmpeg.stdout.pipe(res);
+  ffmpeg.stderr.on("data", (data) => {
+    const message = data.toString().trim();
+    if (message) console.error("ffmpeg:", message.slice(0, 500));
+  });
+  ffmpeg.on("error", (error) => {
+    clearTimeout(timeout);
+    console.error("ffmpeg spawn error:", error.message);
+    if (!res.writableEnded) res.destroy(error);
+  });
+  ffmpeg.on("close", (code) => {
+    clearTimeout(timeout);
+    finished = true;
+    if (code !== 0 && !res.writableEnded)
+      res.destroy(new Error("Audio transcoding failed."));
+    else if (!res.writableEnded) res.end();
+  });
+  res.on("close", () => {
+    if (!finished) {
+      clearTimeout(timeout);
+      ffmpeg.stdout.unpipe(res);
+      killFfmpeg();
+    }
+  });
 }
 
 app.get("/api/download", handleDownloadStream);
