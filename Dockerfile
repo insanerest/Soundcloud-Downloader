@@ -25,7 +25,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 
 # Application source
-COPY index.js package.json ./
+COPY index.js security.js package.json ./
 COPY public ./public
 
 # yt-dlp Python zipapp — architecture-agnostic, works on arm64 and amd64
